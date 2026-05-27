@@ -10,7 +10,9 @@
 ## Install
 
 ```bash
-pip install -e .
+git clone https://github.com/quentinRevillon/nnunet-onnx.git
+cd nnunet-onnx
+pip install -e ".[export]"
 ```
 
 ---
@@ -150,4 +152,4 @@ These fields are stable across nnUNet v2.x. Pin the nnUNet version used for expo
 
 Python ≥ 3.9. Installed by `pip install -e .`: `nibabel`, `numpy`, `scipy`, `scikit-image`, `onnxruntime`, `onnx`.
 
-`torch` and `nnunetv2` are required for `nnunet-export` and `nnunet-segment-pt` but are **not** managed by this package — they are expected to be already installed in your training environment.
+The `[export]` extra adds `torch` and `nnunetv2`, needed for `nnunet-export` and `nnunet-segment-pt`. If you only want to run ONNX inference on an already-exported model: `pip install -e .`

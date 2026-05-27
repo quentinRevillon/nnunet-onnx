@@ -22,3 +22,9 @@ dependencies = [
     "onnxruntime",
     "onnx",
 ]
+
+[project.optional-dependencies]
+export = [
+    "torch>=2.0",
+    "nnunetv2",
+]

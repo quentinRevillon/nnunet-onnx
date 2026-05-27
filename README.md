@@ -13,8 +13,6 @@
 pip install -e .
 ```
 
-The export step (`python -m nnunet_onnx.export`) requires `torch` and `nnunetv2` — both are already present in the environment where you trained your model. Once exported, inference needs only `onnxruntime`.
-
 ---
 
 ## Tutorial
@@ -56,9 +54,9 @@ python -m nnunet_onnx.export \
 
 This produces a single `model.onnx` file (~115 MB). Preprocessing parameters are embedded in its metadata — nothing else is needed for inference.
 
-### Step 4 — Benchmark ONNX vs PyTorch
+### Step 4 — Measure the speedup
 
-Run the example script to segment the image with both backends and compare speed and output:
+Run the example script to segment the image with both backends and observe the speed difference:
 
 ```bash
 python examples/validate_onnx_export.py \
@@ -67,7 +65,7 @@ python examples/validate_onnx_export.py \
     --output-dir output/
 ```
 
-Expected output (CPU, no GPU):
+Expected output on CPU:
 
 ```
 [1/3] Exporting nnUNet checkpoint → ONNX ...
@@ -87,7 +85,7 @@ Expected output (CPU, no GPU):
   ✓  ONNX == PT
 ```
 
-The speedup is more pronounced on small images (e.g. after spinal cord cropping with [sc-crop](https://github.com/ivadomed/sc-crop)) where fewer sliding-window steps are needed and ONNX Runtime's lower per-call overhead matters more — typically **~2× faster** than PyTorch on CPU.
+The segmentations are identical (Dice = 1.0). The speedup is more pronounced on cropped images — e.g. after spinal cord detection with [sc-crop](https://github.com/ivadomed/sc-crop) — where fewer sliding-window steps are needed: typically **~2× faster** on CPU.
 
 ---
 

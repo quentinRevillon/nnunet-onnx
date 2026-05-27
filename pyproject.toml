@@ -14,11 +14,7 @@ dependencies = [
     "scipy",
     "scikit-image",
     "onnxruntime",
-]
-
-[project.optional-dependencies]
-export = [
+    "onnx",
     "torch>=2.0",
     "nnunetv2==2.5.1",
-    "onnx",
 ]

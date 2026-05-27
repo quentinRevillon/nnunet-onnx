@@ -10,9 +10,10 @@
 ## Install
 
 ```bash
-conda create -n nnunet_onnx python=3.10 && conda activate nnunet_onnx
-pip install -e ".[export]"
+pip install -e .
 ```
+
+The export step (`python -m nnunet_onnx.export`) requires `torch` and `nnunetv2` — both are already present in the environment where you trained your model. Once exported, inference needs only `onnxruntime`.
 
 ---
 

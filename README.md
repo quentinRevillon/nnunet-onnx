@@ -116,22 +116,38 @@ Diff voxels : 0
 
 ## Python API
 
+### Export
+
+```python
+from nnunet_onnx.export import export
+
+# Convert a nnUNet v2 checkpoint to a self-contained ONNX file.
+# Input : fold_N/checkpoint_best.pth  (or checkpoint_final.pth)
+# Output: model.onnx  — network weights + preprocessing params embedded in metadata
+export(
+    checkpoint_path='nnUNetTrainer__nnUNetPlans__3d_fullres/fold_0/checkpoint_best.pth',
+    output='model.onnx',
+)
+```
+
+### Inference
+
 ```python
 import nibabel as nib
 from nnunet_onnx import infer_onnx, infer_pt
 
 img = nib.load('image.nii.gz')
 
-# ONNX — no PyTorch, no nnunetv2
+# ONNX — no PyTorch, no nnunetv2 at runtime
 seg = infer_onnx(img, 'model.onnx')
 
-# PyTorch — reference inference from the original checkpoint
-seg = infer_pt(img, 'fold_0/checkpoint_best.pth')
+# PyTorch — reference inference directly from the checkpoint
+seg = infer_pt(img, 'nnUNetTrainer__nnUNetPlans__3d_fullres/fold_0/checkpoint_best.pth')
 
 nib.save(seg, 'seg.nii.gz')
 ```
 
-Both functions accept any NIfTI image (any orientation) and return a binary segmentation mask in the same space and orientation as the input.
+Both inference functions accept any NIfTI image (any orientation) and return a binary segmentation mask in the same space and orientation as the input.
 
 ---
 

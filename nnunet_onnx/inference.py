@@ -193,3 +193,41 @@ def infer_pt(img, checkpoint_path, device='cpu', use_mirroring=False):
 
     seg_rpi = nib.Nifti1Image(pred_arr, img_rpi.affine)
     return reorient_back(seg_rpi, orig_ornt)
+
+
+# ── CLI entry points ──────────────────────────────────────────────────────────
+
+def _cli_onnx():
+    """Entry point for: nnunet-segment-onnx"""
+    import argparse, time
+    parser = argparse.ArgumentParser(description='nnUNet ONNX inference (no PyTorch)')
+    parser.add_argument('-i',       required=True, help='Input NIfTI image')
+    parser.add_argument('-o',       required=True, help='Output segmentation mask')
+    parser.add_argument('--model',  required=True, help='Path to model.onnx')
+    parser.add_argument('--tile-step', type=float, default=0.5)
+    parser.add_argument('--threads',   type=int,   default=None)
+    args = parser.parse_args()
+
+    t0  = time.perf_counter()
+    seg = infer_onnx(nib.load(args.i), args.model,
+                     tile_step=args.tile_step, threads=args.threads)
+    nib.save(seg, args.o)
+    print(f'{time.perf_counter()-t0:.1f}s  →  {args.o}')
+
+
+def _cli_pt():
+    """Entry point for: nnunet-segment-pt"""
+    import argparse, time
+    parser = argparse.ArgumentParser(description='nnUNet PyTorch inference')
+    parser.add_argument('-i',            required=True, help='Input NIfTI image')
+    parser.add_argument('-o',            required=True, help='Output segmentation mask')
+    parser.add_argument('--checkpoint',  required=True, help='Path to fold_N/checkpoint_*.pth')
+    parser.add_argument('--device',      default='cpu', choices=['cpu', 'cuda', 'mps'])
+    parser.add_argument('--tta',         action='store_true', help='Enable mirroring TTA (8× slower)')
+    args = parser.parse_args()
+
+    t0  = time.perf_counter()
+    seg = infer_pt(nib.load(args.i), args.checkpoint,
+                   device=args.device, use_mirroring=args.tta)
+    nib.save(seg, args.o)
+    print(f'{time.perf_counter()-t0:.1f}s  →  {args.o}')

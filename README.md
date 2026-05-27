@@ -54,38 +54,25 @@ python -m nnunet_onnx.export \
 
 This produces a single `model.onnx` file (~115 MB). Preprocessing parameters are embedded in its metadata — nothing else is needed for inference.
 
-### Step 4 — Measure the speedup
-
-Run the example script to segment the image with both backends and observe the speed difference:
+### Step 4 — Segment with ONNX
 
 ```bash
-python examples/validate_onnx_export.py \
-    --checkpoint model_contrast_agnostic_20250123/nnUNetTrainer__nnUNetPlans__3d_fullres/fold_0/checkpoint_best.pth \
-    --image      single_subject/data/t2/t2.nii.gz \
-    --output-dir output/
+nnunet-segment-onnx \
+    -i single_subject/data/t2/t2.nii.gz \
+    -o seg_onnx.nii.gz \
+    --model model.onnx
 ```
 
-Expected output on CPU:
+### Step 5 — Segment with PyTorch and compare
 
-```
-[1/3] Exporting nnUNet checkpoint → ONNX ...
-      Exported → output/model.onnx  (117.5 MB)  [plans embedded in metadata]
-
-[2/3] Running ONNX inference (no PyTorch) ...
-      Done in 21s  →  output/seg_onnx.nii.gz
-
-[3/3] Running PyTorch inference ...
-      Done in 25s  →  output/seg_pt.nii.gz
-
-────────────────────────────────────────
-  Dice        : 1.0000
-  Diff voxels : 0
-────────────────────────────────────────
-
-  ✓  ONNX == PT
+```bash
+nnunet-segment-pt \
+    -i single_subject/data/t2/t2.nii.gz \
+    -o seg_pt.nii.gz \
+    --checkpoint model_contrast_agnostic_20250123/nnUNetTrainer__nnUNetPlans__3d_fullres/fold_0/checkpoint_best.pth
 ```
 
-The segmentations are identical (Dice = 1.0). The speedup is more pronounced on cropped images — e.g. after spinal cord detection with [sc-crop](https://github.com/ivadomed/sc-crop) — where fewer sliding-window steps are needed: typically **~2× faster** on CPU.
+Both commands print the elapsed time, so you can directly compare. On CPU the ONNX backend is typically **~2× faster** on pre-cropped images (e.g. after [sc-crop](https://github.com/ivadomed/sc-crop)), where fewer sliding-window steps are needed.
 
 ---
 
@@ -150,4 +137,6 @@ These fields are stable across nnUNet v2.x. Pin the nnUNet version used for expo
 
 ## Requirements
 
-Python ≥ 3.9. Dependencies: `nibabel`, `numpy`, `scipy`, `scikit-image`, `onnxruntime`, `torch >= 2.0`, `nnunetv2 == 2.5.1`, `onnx`.
+Python ≥ 3.9. Installed by `pip install -e .`: `nibabel`, `numpy`, `scipy`, `scikit-image`, `onnxruntime`, `onnx`.
+
+`torch` and `nnunetv2` are required for `nnunet-export` and `nnunet-segment-pt` but are **not** managed by this package — they are expected to be already installed in your training environment.

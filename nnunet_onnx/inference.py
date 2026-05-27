@@ -220,34 +220,134 @@ def _cli_compare():
 def _cli_onnx():
     """Entry point for: nnunet-segment-onnx"""
     import argparse, time
+    import onnxruntime as ort
+    from nibabel.orientations import io_orientation
+    from .preprocessing import (reorient_to_rpi, reorient_back, get_voxel_spacing_zyx,
+                                 crop_to_nonzero, zscore_normalize, resample, compute_new_shape)
+    from .postprocessing import pad_back, softmax_threshold
+
     parser = argparse.ArgumentParser(description='nnUNet ONNX inference (no PyTorch)')
-    parser.add_argument('-i',       required=True, help='Input NIfTI image')
-    parser.add_argument('-o',       required=True, help='Output segmentation mask')
-    parser.add_argument('--model',  required=True, help='Path to model.onnx')
+    parser.add_argument('-i',          required=True, help='Input NIfTI image')
+    parser.add_argument('-o',          required=True, help='Output segmentation mask')
+    parser.add_argument('--model',     required=True, help='Path to model.onnx')
     parser.add_argument('--tile-step', type=float, default=0.5)
     parser.add_argument('--threads',   type=int,   default=None)
     args = parser.parse_args()
 
+    SEP = '─' * 38
+
+    # ── preprocessing ─────────────────────────────────────────────────────────
     t0  = time.perf_counter()
-    seg = infer_onnx(nib.load(args.i), args.model,
-                     tile_step=args.tile_step, threads=args.threads)
+    img = nib.load(args.i)
+
+    sess_options = ort.SessionOptions()
+    if args.threads:
+        sess_options.intra_op_num_threads = args.threads
+    session    = ort.InferenceSession(args.model, sess_options=sess_options,
+                                      providers=['CPUExecutionProvider'])
+    plans      = _read_plans_from_onnx(session)
+    target_sp  = plans['target_spacing']
+    patch_size = plans['patch_size']
+
+    orig_ornt    = io_orientation(img.affine)
+    img_rpi      = reorient_to_rpi(img)
+    data         = img_rpi.get_fdata().transpose((2, 1, 0)).astype(np.float32)
+    orig_spacing = get_voxel_spacing_zyx(img_rpi)
+    shape_before = data.shape
+    data_cropped, bbox = crop_to_nonzero(data)
+    data_norm          = zscore_normalize(data_cropped)
+    new_shape          = compute_new_shape(data_cropped.shape, orig_spacing, target_sp)
+    data_rs            = resample(data_norm, new_shape, orig_spacing, target_sp, order=3, order_z=0)
+    t1 = time.perf_counter()
+
+    # ── sliding window ─────────────────────────────────────────────────────────
+    steps     = _compute_steps(list(data_rs.shape), patch_size, args.tile_step)
+    n_patches = len(steps[0]) * len(steps[1]) * len(steps[2])
+    avg_logits = _sliding_window(data_rs, session, patch_size, args.tile_step)
+    t2 = time.perf_counter()
+
+    # ── postprocessing ─────────────────────────────────────────────────────────
+    logits_back = np.stack([
+        resample(avg_logits[c], data_cropped.shape, target_sp, orig_spacing, order=1, order_z=0)
+        for c in range(2)
+    ])
+    pred_zyx = pad_back(softmax_threshold(logits_back), bbox, shape_before)
+    seg_rpi  = nib.Nifti1Image(pred_zyx.transpose((2, 1, 0)).astype(np.uint8), img_rpi.affine)
+    seg      = reorient_back(seg_rpi, orig_ornt)
     nib.save(seg, args.o)
-    print(f'{time.perf_counter()-t0:.1f}s  →  {args.o}')
+    t3 = time.perf_counter()
+
+    print(SEP)
+    print(f'  preprocessing  : {t1-t0:.1f}s')
+    print(f'  inference      : {t2-t1:.1f}s  ({n_patches} patches)')
+    print(f'  postprocessing : {t3-t2:.1f}s')
+    print(SEP)
+    print(f'  total          : {t3-t0:.1f}s  →  {args.o}')
 
 
 def _cli_pt():
     """Entry point for: nnunet-segment-pt"""
-    import argparse, time
+    import argparse, os, io, contextlib, time, tempfile
+    from nibabel.orientations import io_orientation
+    from .preprocessing import reorient_to_rpi, reorient_back
+
+    # Set env vars before nnunetv2 import to suppress its startup warnings
+    os.environ.setdefault('nnUNet_raw', 'dummy')
+    os.environ.setdefault('nnUNet_preprocessed', 'dummy')
+    os.environ.setdefault('nnUNet_results', 'dummy')
+    sink = io.StringIO()
+    with contextlib.redirect_stdout(sink), contextlib.redirect_stderr(sink):
+        import torch
+        from nnunetv2.inference.predict_from_raw_data import nnUNetPredictor
+
     parser = argparse.ArgumentParser(description='nnUNet PyTorch inference')
-    parser.add_argument('-i',            required=True, help='Input NIfTI image')
-    parser.add_argument('-o',            required=True, help='Output segmentation mask')
-    parser.add_argument('--checkpoint',  required=True, help='Path to fold_N/checkpoint_*.pth')
-    parser.add_argument('--device',      default='cpu', choices=['cpu', 'cuda', 'mps'])
-    parser.add_argument('--tta',         action='store_true', help='Enable mirroring TTA (8× slower)')
+    parser.add_argument('-i',           required=True, help='Input NIfTI image')
+    parser.add_argument('-o',           required=True, help='Output segmentation mask')
+    parser.add_argument('--checkpoint', required=True, help='Path to fold_N/checkpoint_*.pth')
+    parser.add_argument('--device',     default='cpu', choices=['cpu', 'cuda', 'mps'])
+    parser.add_argument('--tta',        action='store_true', help='Enable mirroring TTA (8× slower)')
     args = parser.parse_args()
 
-    t0  = time.perf_counter()
-    seg = infer_pt(nib.load(args.i), args.checkpoint,
-                   device=args.device, use_mirroring=args.tta)
+    SEP = '─' * 38
+
+    fold_dir     = os.path.dirname(args.checkpoint)
+    model_folder = os.path.dirname(fold_dir)
+    fold_num     = int(os.path.basename(fold_dir).replace('fold_', ''))
+    ckpt_name    = os.path.basename(args.checkpoint)
+
+    # ── load model ─────────────────────────────────────────────────────────────
+    t0 = time.perf_counter()
+    with contextlib.redirect_stdout(sink), contextlib.redirect_stderr(sink):
+        p = nnUNetPredictor(tile_step_size=0.5, use_gaussian=True,
+                            use_mirroring=args.tta,
+                            perform_everything_on_device=(args.device != 'cpu'),
+                            device=torch.device(args.device),
+                            verbose=False, verbose_preprocessing=False, allow_tqdm=False)
+        p.initialize_from_trained_model_folder(model_folder, use_folds=[fold_num],
+                                               checkpoint_name=ckpt_name)
+    t1 = time.perf_counter()
+
+    # ── inference (preproc + network + postproc) ───────────────────────────────
+    img       = nib.load(args.i)
+    orig_ornt = io_orientation(img.affine)
+    img_rpi   = reorient_to_rpi(img)
+    crop_tmp  = tempfile.mktemp(suffix='_0000.nii.gz')
+    nib.save(img_rpi, crop_tmp)
+    tmpdir = tempfile.mkdtemp()
+    with contextlib.redirect_stdout(sink), contextlib.redirect_stderr(sink):
+        p.predict_from_files([[crop_tmp]], tmpdir, save_probabilities=False, overwrite=True,
+                             num_processes_preprocessing=1, num_processes_segmentation_export=1)
+    t2 = time.perf_counter()
+
+    pred_arr = np.asarray(nib.load(glob.glob(tmpdir + '/*.nii.gz')[0]).dataobj).astype(np.uint8)
+    os.remove(crop_tmp)
+    seg = reorient_back(nib.Nifti1Image(pred_arr, img_rpi.affine), orig_ornt)
     nib.save(seg, args.o)
-    print(f'{time.perf_counter()-t0:.1f}s  →  {args.o}')
+    t3 = time.perf_counter()
+
+    print(SEP)
+    print(f'  model loading  : {t1-t0:.1f}s')
+    print(f'  inference      : {t2-t1:.1f}s  (preproc + network + postproc)')
+    print(f'  save           : {t3-t2:.1f}s')
+    print(SEP)
+    print(f'  total          : {t3-t0:.1f}s  →  {args.o}')

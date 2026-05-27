@@ -10,9 +10,8 @@
 ## Install
 
 ```bash
-git clone https://github.com/quentinRevillon/nnunet-onnx.git
-cd nnunet-onnx
-pip install -e .
+conda create -n nnunet_onnx python=3.10 && conda activate nnunet_onnx
+pip install git+https://github.com/quentinRevillon/nnunet-onnx.git
 ```
 
 ---

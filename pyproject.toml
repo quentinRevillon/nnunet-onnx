@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.backends.legacy:build"
+
+[project]
+name = "nnunet-onnx"
+version = "0.1.0"
+description = "Export nnUNet models to ONNX and run inference without PyTorch"
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = [
+    "nibabel",
+    "numpy",
+    "scipy",
+    "scikit-image",
+    "onnxruntime",
+]
+
+[project.optional-dependencies]
+export = [
+    "torch>=2.0",
+    "nnunetv2==2.5.1",
+    "onnx",
+]

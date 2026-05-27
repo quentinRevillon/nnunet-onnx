@@ -197,6 +197,26 @@ def infer_pt(img, checkpoint_path, device='cpu', use_mirroring=False):
 
 # ── CLI entry points ──────────────────────────────────────────────────────────
 
+def _cli_compare():
+    """Entry point for: nnunet-compare"""
+    import argparse
+    parser = argparse.ArgumentParser(description='Compare two segmentation masks (Dice)')
+    parser.add_argument('seg_a', help='First segmentation (.nii.gz)')
+    parser.add_argument('seg_b', help='Second segmentation (.nii.gz)')
+    args = parser.parse_args()
+
+    a = np.asarray(nib.load(args.seg_a).dataobj).astype(bool)
+    b = np.asarray(nib.load(args.seg_b).dataobj).astype(bool)
+
+    inter = (a & b).sum()
+    denom = a.sum() + b.sum()
+    dice  = 2 * inter / denom if denom > 0 else 1.0
+    diff  = int((a != b).sum())
+
+    print(f'Dice        : {dice:.4f}')
+    print(f'Diff voxels : {diff}')
+
+
 def _cli_onnx():
     """Entry point for: nnunet-segment-onnx"""
     import argparse, time

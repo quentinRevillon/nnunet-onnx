@@ -2,6 +2,7 @@
 nnunet-export        = "nnunet_onnx.export:main"
 nnunet-segment-onnx  = "nnunet_onnx.inference:_cli_onnx"
 nnunet-segment-pt    = "nnunet_onnx.inference:_cli_pt"
+nnunet-compare       = "nnunet_onnx.inference:_cli_compare"
 
 [build-system]
 requires = ["setuptools>=68"]

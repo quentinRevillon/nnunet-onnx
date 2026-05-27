@@ -74,6 +74,17 @@ nnunet-segment-pt \
 
 Both commands print the elapsed time, so you can directly compare. On CPU the ONNX backend is typically **~2× faster** on pre-cropped images (e.g. after [sc-crop](https://github.com/ivadomed/sc-crop)), where fewer sliding-window steps are needed.
 
+### Step 6 — Compare the two segmentations
+
+```bash
+nnunet-compare seg_onnx.nii.gz seg_pt.nii.gz
+```
+
+```
+Dice        : 1.0000
+Diff voxels : 0
+```
+
 ---
 
 ## Python API

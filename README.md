@@ -73,7 +73,7 @@ nnunet-segment-pt \
     --checkpoint model_contrast_agnostic_20250123/nnUNetTrainer__nnUNetPlans__3d_fullres/fold_0/checkpoint_best.pth
 ```
 
-Both commands print the elapsed time, so you can directly compare. On CPU the ONNX backend is typically **~2× faster** on pre-cropped images (e.g. after [sc-crop](https://github.com/ivadomed/sc-crop)), where fewer sliding-window steps are needed.
+Both commands print the elapsed time, so you can directly compare. On full images the two backends run at similar speed. The ONNX advantage is mainly **deployment**: no PyTorch, no nnunetv2, lighter environment. A speed gain appears on small pre-cropped images (e.g. after [sc-crop](https://github.com/ivadomed/sc-crop)) where fewer sliding-window steps reduce ONNX Runtime's per-call overhead.
 
 ### Step 6 — Compare the two segmentations
 

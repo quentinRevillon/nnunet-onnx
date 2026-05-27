@@ -2,23 +2,15 @@
 
 [nnUNet](https://github.com/MIC-DKFZ/nnUNet) trains state-of-the-art segmentation models but its inference stack requires PyTorch and the full nnunetv2 package (~2 GB). **nnunet-onnx** lets you export any trained nnUNet checkpoint to a single self-contained `.onnx` file and run inference with only `onnxruntime` — no PyTorch, no nnunetv2.
 
-- **`export`** — one-time conversion of `checkpoint_final.pth` → `model.onnx`. Preprocessing parameters (spacing, patch size) are read directly from the checkpoint and embedded in the ONNX metadata. No `plans.json` required.
+- **`export`** — convert `checkpoint_*.pth` → `model.onnx`. Preprocessing parameters (spacing, patch size) are read directly from the checkpoint and embedded in the ONNX metadata. No `plans.json` required.
 - **`inference`** — full nnUNet preprocessing + sliding-window + postprocessing reimplemented in pure numpy/scipy. Takes any NIfTI image (any orientation), returns a binary segmentation mask in the same space.
 
 ---
 
 ## Install
 
-Fresh dedicated environment (for testing):
-
 ```bash
 conda create -n nnunet_onnx python=3.10 && conda activate nnunet_onnx
-pip install -e .
-```
-
-The `[export]` extra adds PyTorch + nnunetv2 — only needed for the one-time model conversion:
-
-```bash
 pip install -e ".[export]"
 ```
 
@@ -63,17 +55,9 @@ python -m nnunet_onnx.export \
 
 This produces a single `model.onnx` file (~115 MB). Preprocessing parameters are embedded in its metadata — nothing else is needed for inference.
 
-### Step 4 — Run inference
+### Step 4 — Benchmark ONNX vs PyTorch
 
-```python
-import nibabel as nib
-from nnunet_onnx import infer_onnx
-
-seg = infer_onnx(nib.load('single_subject/data/t2/t2.nii.gz'), 'model.onnx')
-nib.save(seg, 'seg.nii.gz')
-```
-
-Or with the example script:
+Run the example script to segment the image with both backends and compare speed and output:
 
 ```bash
 python examples/validate_onnx_export.py \
@@ -82,25 +66,27 @@ python examples/validate_onnx_export.py \
     --output-dir output/
 ```
 
-Expected output:
+Expected output (CPU, no GPU):
 
 ```
 [1/3] Exporting nnUNet checkpoint → ONNX ...
-      Exported → output/model.onnx  (115.4 MB)  [plans embedded in metadata]
+      Exported → output/model.onnx  (117.5 MB)  [plans embedded in metadata]
 
 [2/3] Running ONNX inference (no PyTorch) ...
-      Done in 23s  →  output/seg_onnx.nii.gz
+      Done in 21s  →  output/seg_onnx.nii.gz
 
 [3/3] Running PyTorch inference ...
-      Done in 27s  →  output/seg_pt.nii.gz
+      Done in 25s  →  output/seg_pt.nii.gz
 
 ────────────────────────────────────────
   Dice        : 1.0000
-  Diff voxels : 2
+  Diff voxels : 0
 ────────────────────────────────────────
 
   ✓  ONNX == PT
 ```
+
+The speedup is more pronounced on small images (e.g. after spinal cord cropping with [sc-crop](https://github.com/ivadomed/sc-crop)) where fewer sliding-window steps are needed and ONNX Runtime's lower per-call overhead matters more — typically **~2× faster** than PyTorch on CPU.
 
 ---
 
@@ -112,10 +98,10 @@ from nnunet_onnx import infer_onnx, infer_pt
 
 img = nib.load('image.nii.gz')
 
-# ONNX inference — no PyTorch, no nnunetv2
+# ONNX — no PyTorch, no nnunetv2
 seg = infer_onnx(img, 'model.onnx')
 
-# PyTorch inference — for comparison / validation
+# PyTorch — reference inference from the original checkpoint
 seg = infer_pt(img, 'fold_0/checkpoint_best.pth')
 
 nib.save(seg, 'seg.nii.gz')
@@ -159,12 +145,10 @@ The preprocessing reads two fields from the ONNX metadata set at export time:
 - `target_spacing` — resampling target
 - `patch_size` — sliding window size
 
-These fields are stable across nnUNet v2.x. Pin the nnUNet version used for export in `pyproject.toml[export]` and distribute `model.onnx` as a versioned artefact. The checkpoint used for export does not need to be kept.
+These fields are stable across nnUNet v2.x. Pin the nnUNet version used for export (`nnunetv2==X.Y.Z` in `pyproject.toml`) and distribute `model.onnx` as a versioned artefact. The original checkpoint is not needed after export.
 
 ---
 
 ## Requirements
 
-Python ≥ 3.9. Core (inference only): `nibabel`, `numpy`, `scipy`, `scikit-image`, `onnxruntime`.
-
-Export extra: `torch >= 2.0`, `nnunetv2 == 2.5.1`, `onnx`.
+Python ≥ 3.9. Dependencies: `nibabel`, `numpy`, `scipy`, `scikit-image`, `onnxruntime`, `torch >= 2.0`, `nnunetv2 == 2.5.1`, `onnx`.

@@ -53,7 +53,33 @@ python -m nnunet_onnx.export \
     --output     model.onnx
 ```
 
-This produces a single `model.onnx` file (~115 MB). Preprocessing parameters are embedded in its metadata — nothing else is needed for inference.
+**What to pass as `--checkpoint`**
+
+After a standard nnUNet v2 training, the output folder has this structure:
+
+```
+nnUNetTrainer__nnUNetPlans__3d_fullres/
+├── plans.json
+├── dataset.json
+├── fold_0/
+│   ├── checkpoint_best.pth    ← use this (best validation Dice)
+│   └── checkpoint_final.pth   ← or this (last epoch)
+├── fold_1/
+│   └── ...
+└── ...
+```
+
+Pass the `.pth` file from **any single fold** — `fold_0` is the standard choice.
+The checkpoint is self-contained: `plans.json` and `dataset.json` are embedded inside it by nnUNet at training time. No other file is needed.
+
+> **Current limitation — single fold only.**
+> The export converts one checkpoint at a time.
+> nnUNet's default cross-validation trains 5 folds and averages their predictions at inference.
+> This package currently exports and runs a single fold. Multi-fold ensemble support is not implemented.
+
+**Compatibility:** nnUNet v2 only (`nnunetv2` package). nnUNet v1 checkpoints do not embed `init_args` and are not supported.
+
+This produces a single `model.onnx` file (~115 MB). Preprocessing parameters (target spacing, patch size) are embedded in its metadata — nothing else is needed for inference.
 
 ### Step 4 — Segment with ONNX
 

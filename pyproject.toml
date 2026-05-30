@@ -21,6 +21,10 @@ dependencies = [
     "scikit-image",
     "onnxruntime",
     "onnx",
+]
+
+[project.optional-dependencies]
+export = [
     "torch",
     "nnunetv2",
     "onnxscript",

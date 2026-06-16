@@ -94,20 +94,25 @@ def _read_plans_from_onnx(session):
     return json.loads(meta['plans'])
 
 
-def infer_onnx(img, model_path, tile_step=0.5, threads=None):
-    """Run nnUNet inference via ONNX Runtime (no PyTorch).
+def infer_onnx_array(data, spacing, model_path, tile_step=0.5, threads=None):
+    """Run nnUNet inference via ONNX Runtime on a pre-oriented array (NO reorientation).
 
-    Plans (target spacing, patch size) are read directly from the ONNX metadata
-    embedded at export time — no external plans.json needed.
+    This is the engine, equivalent to nnUNet's ``predict_single_npy_array``: it does
+    crop-to-nonzero, z-score normalisation, resampling, Gaussian sliding window and
+    resampling back — but performs **no** anatomical reorientation. The caller is
+    responsible for presenting the data in the axis order / orientation the model was
+    trained on (z, y, x), exactly as nnUNet's I/O class would. This keeps orientation
+    handling where it belongs (the caller), so it can follow the caller's own convention.
 
     Args:
-        img:        nibabel NIfTI image, any orientation.
-        model_path: path to .onnx model file (exported with nnunet_onnx.export).
+        data:       3D numpy array (z, y, x), already in the model's orientation.
+        spacing:    voxel spacing (z, y, x).
+        model_path: path to the .onnx model file (exported with nnunet_onnx.export).
         tile_step:  sliding window step as fraction of patch size (default 0.5).
         threads:    ONNX Runtime intra-op threads (default: auto).
 
     Returns:
-        nibabel NIfTI1Image — binary segmentation in the same space/orientation as img.
+        3D uint8 numpy array (z, y, x) — binary segmentation on the same grid as ``data``.
     """
     import onnxruntime as ort
 
@@ -121,25 +126,46 @@ def infer_onnx(img, model_path, tile_step=0.5, threads=None):
     target_sp  = plans['target_spacing']
     patch_size = plans['patch_size']
 
-    orig_ornt = io_orientation(img.affine)
-    img_rpi   = reorient_to_rpi(img)
-
-    data         = img_rpi.get_fdata().transpose((2, 1, 0)).astype(np.float32)
-    orig_spacing = get_voxel_spacing_zyx(img_rpi)
+    data         = np.asarray(data, dtype=np.float32)
     shape_before = data.shape
 
     data_cropped, bbox = crop_to_nonzero(data)
     data_norm          = zscore_normalize(data_cropped)
-    new_shape          = compute_new_shape(data_cropped.shape, orig_spacing, target_sp)
-    data_rs            = resample(data_norm, new_shape, orig_spacing, target_sp, order=3, order_z=0)
+    new_shape          = compute_new_shape(data_cropped.shape, spacing, target_sp)
+    data_rs            = resample(data_norm, new_shape, spacing, target_sp, order=3, order_z=0)
 
     avg_logits = _sliding_window(data_rs, session, patch_size, tile_step)
 
     logits_back = np.stack([
-        resample(avg_logits[c], data_cropped.shape, target_sp, orig_spacing, order=1, order_z=0)
+        resample(avg_logits[c], data_cropped.shape, target_sp, spacing, order=1, order_z=0)
         for c in range(2)
     ])
-    pred_zyx = pad_back(softmax_threshold(logits_back), bbox, shape_before)
+    return pad_back(softmax_threshold(logits_back), bbox, shape_before).astype(np.uint8)
+
+
+def infer_onnx(img, model_path, tile_step=0.5, threads=None):
+    """Run nnUNet inference via ONNX Runtime (no PyTorch), reorienting to RPI internally.
+
+    Convenience wrapper around :func:`infer_onnx_array` for standalone use: it reorients
+    the image to (nibabel) RPI, runs the engine, and restores the original orientation.
+    NOTE: this uses nibabel's RPI convention. Callers that have their own orientation
+    convention (e.g. SCT) should reorient themselves and call :func:`infer_onnx_array`.
+
+    Args:
+        img:        nibabel NIfTI image, any orientation.
+        model_path: path to .onnx model file (exported with nnunet_onnx.export).
+        tile_step:  sliding window step as fraction of patch size (default 0.5).
+        threads:    ONNX Runtime intra-op threads (default: auto).
+
+    Returns:
+        nibabel NIfTI1Image — binary segmentation in the same space/orientation as img.
+    """
+    orig_ornt = io_orientation(img.affine)
+    img_rpi   = reorient_to_rpi(img)
+
+    data     = img_rpi.get_fdata().transpose((2, 1, 0))
+    spacing  = get_voxel_spacing_zyx(img_rpi)
+    pred_zyx = infer_onnx_array(data, spacing, model_path, tile_step=tile_step, threads=threads)
     pred_xyz = pred_zyx.transpose((2, 1, 0)).astype(np.uint8)
 
     seg_rpi = nib.Nifti1Image(pred_xyz, img_rpi.affine)

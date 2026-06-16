@@ -19,6 +19,7 @@ import nibabel as nib
 import numpy as np
 from nibabel.orientations import io_orientation
 from scipy.ndimage import gaussian_filter
+from tqdm import tqdm
 
 from .postprocessing import pad_back, softmax_threshold
 from .preprocessing import (
@@ -75,13 +76,19 @@ def _sliding_window(data, session, patch_size, tile_step):
     in_name    = session.get_inputs()[0].name
     out_name   = session.get_outputs()[0].name
 
-    for dz in _compute_steps((Dp, Hp, Wp), patch_size, tile_step)[0]:
-        for dy in _compute_steps((Dp, Hp, Wp), patch_size, tile_step)[1]:
-            for dx in _compute_steps((Dp, Hp, Wp), patch_size, tile_step)[2]:
-                patch  = data[dz:dz+pd, dy:dy+ph, dx:dx+pw][np.newaxis, np.newaxis]
-                logits = session.run([out_name], {in_name: patch})[0][0]
-                accum      [:, dz:dz+pd, dy:dy+ph, dx:dx+pw] += logits * gauss
-                weight_map [dz:dz+pd, dy:dy+ph, dx:dx+pw]    += gauss
+    # Compute the sliding-window steps once, then iterate with a tqdm progress bar
+    # (mirrors the nnUNet PyTorch predictor's per-patch progress display).
+    steps_d, steps_h, steps_w = _compute_steps((Dp, Hp, Wp), patch_size, tile_step)
+    n_patches = len(steps_d) * len(steps_h) * len(steps_w)
+    with tqdm(total=n_patches) as pbar:
+        for dz in steps_d:
+            for dy in steps_h:
+                for dx in steps_w:
+                    patch  = data[dz:dz+pd, dy:dy+ph, dx:dx+pw][np.newaxis, np.newaxis]
+                    logits = session.run([out_name], {in_name: patch})[0][0]
+                    accum      [:, dz:dz+pd, dy:dy+ph, dx:dx+pw] += logits * gauss
+                    weight_map [dz:dz+pd, dy:dy+ph, dx:dx+pw]    += gauss
+                    pbar.update(1)
 
     return (accum / weight_map)[:, d0:d0+D, h0:h0+H, w0:w0+W]  # (2, D, H, W)
 

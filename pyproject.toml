@@ -21,6 +21,7 @@ dependencies = [
     "scikit-image",
     "onnxruntime",
     "onnx",
+    "tqdm",
 ]
 
 [project.optional-dependencies]
